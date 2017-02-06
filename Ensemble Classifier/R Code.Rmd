@@ -1,0 +1,314 @@
+---
+title: "R Code for Case Study on Ensemble Classifiers"
+output: html_notebook
+---
+##### This notebook contains the code that produces the results in the case study report
+##### [Download Data Here](https://www.kaggle.com/ludobenistant/hr-analytics)
+
+
+Read in the data file and display the top six rows:
+
+```{r}
+dat <- read.csv('HR_comma_sep.csv')
+head(dat)
+```
+
+#### Data Preparation
+
+Display the summary statistics of each column:
+
+```{r}
+summary(dat)
+```
+
+Since the columns, time_spend_company, Work_accident, left and promotion_last_5years should be categorical but they show up as numerical, we need to convert them into factors first. In addition, salary is an ordinal variable and it needs to be specified with an order. Then, we will display the summary statistics again:
+
+```{r}
+dat[6:8] <- lapply(dat[6:8], factor)
+dat$salary <- ordered(dat$salary, c('low', 'medium', 'high'))
+summary(dat)
+```
+
+Double check the data type of each column:
+
+```{r}
+lapply(dat, class)
+```
+
+check the level of left:
+```{r}
+levels(dat$left)
+```
+
+force '1' as the positive level:
+```{r}
+dat$left <- factor(dat$left, levels = c('1', '0'))
+levels(dat$left)
+```
+
+Check if there is any missing value in our data:
+
+```{r}
+sum(is.na(dat))
+```
+
+check for redundancy through correlation:
+```{r}
+library(corrplot)
+var_cor <- cor(dat[,1:5])
+corrplot.mixed(var_cor, upper = 'number', lower='ellipse')
+```
+
+
+
+plot categorical, binary and ordinal data:
+
+```{r}
+library(ggplot2)
+par(mfrow=c(3,1)) 
+ggplot(dat, aes(factor(dat$Work_accident))) + geom_bar(width = 0.3) + 
+          labs(list(x='Work Accident', title="Work_accident"))
+ggplot(dat, aes(factor(dat$promotion_last_5years))) + geom_bar(width = 0.3) + 
+          labs(list(x='Promotion in Last 5 Years', title="promotion_last_5years"))
+ggplot(dat, aes(factor(dat$left))) + geom_bar(width = 0.3) + 
+          labs(list(x='Left the Company', title="left"))
+ggplot(dat, aes(factor(dat$sales))) + geom_bar(width = 0.3) + 
+          labs(list(x='Department', title="sales"))
+ggplot(dat, aes(factor(dat$salary))) + geom_bar(width = 0.3) + 
+          labs(list(x='Salary Level', title="salary"))
+```
+
+As shown above, there is no missing value in the dataset. After converting variables into proper data types, we need to replace categorical variables with dummy varaibles. However, it will make more sense to conduct preliminary analysis with these variables as factors. So, the dummy variables will be created after preliminary analysis and before applying ML algorihtms. 
+
+#### Preliminary Analysis
+See report for discussion of this section
+
+min-max normalization function
+```{r}
+min_max_norm <- function(attr){
+  mi <- min(attr)
+  ma <- max(attr)
+  return((attr-mi)/(ma-mi))
+}
+```
+
+Cross-tabluation and bar graph visualization of salary and sales:
+```{r}
+as.data.frame.matrix(table(dat$salary, dat$sales))
+ggplot(dat, aes(salary)) + geom_bar(aes(fill=sales), position="dodge") + scale_fill_hue(l=60)
+```
+
+Cross-tabluation of salary and promotion_last_5years and then calculate the percentage:
+```{r}
+temp <- as.data.frame.matrix(table(dat$salary, dat$promotion_last_5years))
+for(i in 1:3){
+  temp[i,] <- temp[i,]/sum(temp[i,])
+}
+temp
+```
+
+Cross-tabluation of left and work_accident and then calculate the percentage:
+```{r}
+temp <- as.data.frame.matrix(table(dat$left, dat$Work_accident))
+for(i in 1:2){
+  temp[,i] <- temp[,i]/sum(temp[,i])
+}
+temp
+```
+
+
+Cross-tabluation and bar graph visualizations of salary and time_spend_company:
+```{r}
+temp <- as.data.frame.matrix(table(dat$salary, dat$time_spend_company))
+
+for (i in 1:3){
+  temp[i,] <- temp[i,]/sum(temp[i,])
+}
+
+temp
+
+ggplot(dat, aes(salary)) + geom_bar(aes(fill=time_spend_company), position="dodge") + scale_fill_hue(l=60)
+```
+
+
+Cross-tabluation of left and time_spend_company:
+```{r}
+temp <- as.data.frame.matrix(table(dat$left, dat$time_spend_company))
+
+for (i in 1:3){
+  temp[i,] <- temp[i,]/sum(temp[i,])
+}
+
+temp
+
+```
+
+density plot of monthly hour, and by left and sales variables
+```{r}
+ggplot(dat, aes(average_montly_hours)) + geom_density(fill="black") 
+
+ggplot(dat, aes(average_montly_hours)) + geom_density(fill="black") + facet_grid(sales ~ left)
+```
+
+cross tabulation of left and number_project
+```{r}
+temp <- as.data.frame.matrix(table(dat$left, dat$number_project))
+
+for (i in 1:2){
+  temp[i,] <- temp[i,]/sum(temp[i,])
+}
+
+temp
+```
+
+realtionship among last_evaluation, time_spend_company and left
+```{r}
+ggplot(dat, aes(last_evaluation)) + geom_density(fill="black") + facet_grid(time_spend_company ~ left)
+```
+
+relationship between satisfaction_level, department and left
+```{r}
+ggplot(dat, aes(satisfaction_level)) + geom_density(fill="black") + facet_grid(sales ~ left)
+```
+
+
+#### Data transformation
+
+Converting dummies
+
+```{r}
+head(as.data.frame.matrix(model.matrix(~Work_accident+promotion_last_5years+sales-1, dat)))
+```
+
+concatenate with the dat dataframe
+
+```{r}
+dums <- as.data.frame.matrix(model.matrix(~Work_accident+promotion_last_5years+sales-1, dat))
+salaryLow <- as.data.frame(ifelse(dat$salary=='low', 1, 0))
+colnames(salaryLow) <- 'salaryLow'
+salaryMed <- as.data.frame(ifelse(dat$salary=='medium', 1, 0))
+colnames(salaryMed) <- 'salaryMed'
+salaryHigh <- as.data.frame(ifelse(dat$salary=='high', 1, 0))
+colnames(salaryHigh) <- 'salaryHigh'
+dat <- cbind(dat, dums, salaryLow, salaryMed, salaryHigh)
+dat[,c('Work_accident','promotion_last_5years','sales', 'salary')] <- NULL
+left <- dat$left
+dat$left <- NULL
+dat$left <- left
+head(dat)
+```
+
+#### Model fitting
+
+Distribution of class labels (count & probability):
+```{r}
+table(dat$left)
+prop.table(table(dat$left))
+```
+
+Deal with unbalanced data first:
+
+```{r}
+library(DMwR)
+library(caret)
+set.seed(1234)
+
+ind <- sample(2, nrow(dat), replace=TRUE, prob=c(0.8, 0.2))
+train <- dat[ind==1,]
+test <- dat[ind==2,]
+
+table(train$left)
+prop.table(table(train$left))
+
+train <- SMOTE(left~., train, perc.over= 50, perc.under = 300)
+table(train$left)
+
+```
+
+Decision Tree: training with 5-fold CV
+
+```{r}
+ctrl <- trainControl(method = "cv", number = 5)
+model.tree <- train(left~., data = train, method='rpart', trControl = ctrl)
+
+test.tree <- predict(model.tree, test)
+confusionMatrix(test.tree, test$left)
+
+library(rattle)
+fancyRpartPlot(model.tree$finalModel)
+
+model.tree$finalModel$variable.importance
+```
+
+Logistic Regression: training with 5-fold CV
+
+```{r}
+model.logistic <- train(left~., data = train, method='glm', trControl = ctrl)
+
+test.logistic <- predict(model.logistic, test)
+confusionMatrix(test.logistic, test$left)
+
+model.logistic$finalModel
+```
+
+
+##### Ensemble Models
+
+Random Forest: training with 5-fold CV (takes time to train and find the best model)
+
+```{r}
+model.rf <- train(left~., data = train, method='rf', trControl = ctrl)
+
+test.rf <- predict(model.rf, test)
+confusionMatrix(test.rf, test$left)
+
+plot(model.rf$finalModel)
+model.rf$finalModel$importance
+```
+
+boosted logistic regression:
+
+```{r}
+model.ada <- train(left~., data = train, method='LogitBoost')
+
+test.ada <- predict(model.ada, test)
+confusionMatrix(test.ada, test$left)
+
+model.ada$finalModel$Stump
+```
+
+ROC curves of all models
+```{r}
+library(ROCR)
+
+tree.pred <- prediction(predict(model.tree$finalModel, test, type='prob')[,1], test$left)
+tree.perf <- performance(tree.pred, "tpr", "fpr")
+logit.pred <- prediction(predict(model.logistic$finalModel, test, type='response'), test$left)
+logit.perf <- performance(logit.pred, "tpr", "fpr")
+rf.pred <- prediction(as.numeric(predict(model.rf$finalModel, test)), as.numeric(test$left))
+rf.perf <- performance(rf.pred, "tpr", "fpr")
+bglm.pred <- prediction(as.numeric(predict(model.ada$finalModel, test)), as.numeric(test$left))
+bglm.perf <- performance(bglm.pred, "tpr", "fpr")
+
+plot(tree.perf, col = 'red', lty=1)
+plot(logit.perf, add = TRUE, col = 'blue', lty=2)
+plot(rf.perf, add=TRUE, col='green', lty=3)
+plot(bglm.perf, add=TRUE, col='purple', lty=4)
+abline(0, 1, lty = 5)
+
+legend('bottomright', 
+       legend=c('Decision Tree', 'Logistic Regression', 'Random Forest', 'Boosted Logistic Regression'),
+       col = c('red', 'blue', 'green', 'purple'),
+       lty = 1:4,
+       cex = 0.5)
+```
+
+
+
+
+
+
+
+
+
+
